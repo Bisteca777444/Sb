@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Suzibet</title>
+<style>
+  body { font-family: Arial,sans-serif; background:#121212; color:#eee; margin:0; padding:0;}
+  header {background:#1e1e1e; padding:20px; display:flex; justify-content:space-between; align-items:center;}
+  .logo {font-weight:bold; font-size:1.5em; color:#f39c12;}
+  .user-info {font-size:1em;}
+  button {background:#f39c12; border:none; color:#121212; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold;}
+  main {padding:20px;}
+  .filters {margin-bottom:20px;}
+  .filters button {background:#333; border:none; color:#eee; margin-right:10px; padding:10px 15px; cursor:pointer; border-radius:5px;}
+  .filters button.active {background:#f39c12; color:#121212;}
+  .games-list {display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:20px;}
+  .game-card {background:#222; padding:15px; border-radius:8px; cursor:pointer; transition:background 0.3s ease; box-shadow:0 0 8px #000;}
+  .game-card:hover {background:#f39c12; color:#121212;}
+  .game-title {font-weight:bold; margin-bottom:10px; font-size:1.1em;}
+  .game-type {font-size:0.9em; font-style:italic; color:#bbb;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Casino Real</div>
+  <div class="user-info" id="user-info">
+    <button id="login-btn">Login</button>
+  </div>
+</header>
+
+<main>
+  <div class="filters" id="filters"></div>
+  <div class="games-list" id="games-list"></div>
+</main>
+
+<script>
+  // URLs das suas APIs — substitua pelas URLs reais
+  const API_BASE = 'https://seu-backend-api.com/api';
+  const LOGIN_API = API_BASE + '/login';
+  const SALDO_API = API_BASE + '/saldo';
+  const JOGOS_API = API_BASE + '/slots';
+
+  const userInfoEl = document.getElementById('user-info');
+  const loginBtn = document.getElementById('login-btn');
+  const filtersEl = document.getElementById('filters');
+  const gamesListEl = document.getElementById('games-list');
+
+  let token = localStorage.getItem('token') || null;
+  let jogos = [];
+  let filtros = [];
+  let filtroAtual = 'all';
+
+  function setLoading(isLoading) {
+    if(isLoading) {
+      gamesListEl.innerHTML = '<p>Carregando...</p>';
+      filtersEl.innerHTML = '';
+    }
+  }
+
+  async function fetchSaldo() {
+    try {
+      const res = await fetch(SALDO_API, {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if(!res.ok) throw new Error('Erro ao buscar saldo');
+      const data = await res.json();
+      return data.saldo; // supondo que o JSON retorne { saldo: number }
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao carregar saldo. Faça login novamente.');
+      logout();
+    }
+  }
+
+  async function fetchJogos() {
+    try {
+      const res = await fetch(JOGOS_API, {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if(!res.ok) throw new Error('Erro ao buscar jogos');
+      const data = await res.json();
+      // data esperado: array de jogos [{id, nome, tipo, url}]
+      return data;
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao carregar jogos.');
+      return [];
+    }
+  }
+
+  function renderUserInfo(nome, saldo) {
+    userInfoEl.innerHTML = `
+      Olá, ${nome} | Saldo: R$ ${saldo.toFixed(2)} 
+      <button id="logout-btn">Sair</button>
+    `;
+    document.getElementById('logout-btn').onclick = logout;
+  }
+
+  function renderFilters() {
+    filtros = ['all', ...new Set(jogos.map(j => j.tipo))];
+    filtersEl.innerHTML = filtros.map(f => `
+      <button class="filter-btn ${f === filtroAtual ? 'active' : ''}" data-filter="${f}">
+        ${f === 'all' ? 'Todos' : f.charAt(0).toUpperCase() + f.slice(1)}
+      </button>
+    `).join('');
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.onclick = () => {
+        filtroAtual = btn.getAttribute('data-filter');
+        renderFilters();
+        renderJogos();
+      };
+    });
+  }
+
+  function renderJogos() {
+    const filtrados = filtroAtual === 'all' ? jogos : jogos.filter(j => j.tipo === filtroAtual);
+    if(filtrados.length === 0) {
+      gamesListEl.innerHTML = '<p>Nenhum jogo encontrado.</p>';
+      return;
+    }
+    gamesListEl.innerHTML = filtrados.map(j => `
+      <div class="game-card" data-url="${j.url}" tabindex="0" role="button" aria-pressed="false" aria-label="Abrir jogo ${j.nome}">
+        <div class="game-title">${j.nome}</div>
+        <div class="game-type">${j.tipo}</div>
+      </div>
+    `).join('');
+    document.querySelectorAll('.game-card').forEach(card => {
+      card.onclick = () => {
+        // Abre o jogo — você pode adaptar para iframe, modal, etc.
+        window.open(card.getAttribute('data-url'), '_blank');
+      };
+      card.onkeypress = (e) => {
+        if(e.key === 'Enter') card.click();
+      };
+    });
+  }
+
+  async function login() {
+    const username = prompt('Digite seu usuário:');
+    if(!username) return alert('Usuário é obrigatório');
+    const password = prompt('Digite sua senha:');
+    if(!password) return alert('Senha é obrigatória');
+
+    try {
+      const res = await fetch(LOGIN_API, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({username, password})
+      });
+      if(!res.ok) throw new Error('Usuário ou senha inválidos');
+      const data = await res.json();
+      token = data.token; // JWT token recebido
+      localStorage.setItem('token', token);
+      await loadUserData();
+    } catch(err) {
+      alert(err.message);
+    }
+  }
+
+  function logout() {
+    token = null;
+    localStorage.removeItem('token');
+    userInfoEl.innerHTML = '<button id="login-btn">Login</button>';
+    document.getElementById('login-btn').onclick = login;
+    filtersEl.innerHTML = '';
+    gamesListEl.innerHTML = '<p>Faça login para ver os jogos.</p>';
+  }
+
+  async function loadUserData() {
+    if(!token) return logout();
+    try {
+      setLoading(true);
+      // Aqui você poderia buscar nome e saldo na mesma API ou separadamente
+      // Exemplo:
+      const saldo = await fetchSaldo();
+
+      // Pega os jogos
+      jogos = await fetchJogos();
+
+      // Renderiza dados
+      renderUserInfo('Usuário', saldo);
+      renderFilters();
+      renderJogos();
+
+      // Ajusta botão logout
+      document.getElementById('logout-btn').onclick = logout;
+    } catch(err) {
+      alert('Erro ao carregar dados. Faça login novamente.');
+      logout();
+    }
+  }
+
+  // Inicializa interface
+  if(token) {
+    loadUserData();
+  } else {
+    gamesListEl.innerHTML = '<p>Faça login para ver os jogos.</p>';
+    document.getElementById('login-btn').onclick = login;
+  }
+</script>
+
+</body>
+</html>
